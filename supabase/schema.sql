@@ -10,6 +10,8 @@ create table if not exists public.rooms (
   status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
   winner int check (winner in (1, 2)),
   win_reason text check (win_reason in ('pass', 'concede')),
+  p1_seen_result boolean not null default false,
+  p2_seen_result boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -32,6 +34,7 @@ alter table public.turns enable row level security;
 create policy "rooms anon select" on public.rooms for select using (true);
 create policy "rooms anon insert" on public.rooms for insert with check (true);
 create policy "rooms anon update" on public.rooms for update using (true) with check (true);
+create policy "rooms anon delete" on public.rooms for delete using (true);
 
 create policy "turns anon select" on public.turns for select using (true);
 create policy "turns anon insert" on public.turns for insert with check (true);

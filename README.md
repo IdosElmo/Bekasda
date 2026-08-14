@@ -22,6 +22,14 @@ turn-based multiplayer. Fully RTL, mobile-first, deployable to GitHub Pages.
 - Client-side validation enforces: Hebrew only, must start with the room's
   letter, max 3 words per turn, and no repeats across the whole game
   (final letters ך/ם/ן/ף/ץ are normalized so "אבנים"/"אבנימ" style dupes are caught).
+- **Dictionary check**: on submit each word is looked up on he.wiktionary and
+  he.wikipedia (free MediaWiki APIs, CORS-enabled). A word found on neither is
+  blocked once; submitting again sends it anyway (dictionaries miss slang and
+  some inflections). Network failures fail open so offline play never gets stuck.
+- **Active games & history**: the home page lists your open rooms with a
+  "תורך!" badge, and finished games move into a local history section with a
+  win/loss tally. Finished rooms are deleted from Supabase once both players
+  have seen the result.
 
 ### No backend? Local mode
 
@@ -44,6 +52,9 @@ npm run dev
 2. Open **SQL Editor** and run the contents of [`supabase/schema.sql`](supabase/schema.sql)
    (creates `rooms` + `turns`, permissive RLS policies for anonymous play, and
    enables Realtime on both tables).
+   - Already ran an older schema.sql? Run
+     [`supabase/upgrade-active-games.sql`](supabase/upgrade-active-games.sql)
+     once instead — it adds the seen-result columns and the delete policy.
 3. Copy **Project Settings → API → Project URL** and the **anon public key** into:
    - Local dev: `.env` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
    - GitHub deploy: repository **Settings → Secrets and variables → Actions →

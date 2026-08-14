@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Dices, Play, LogIn, ChevronDown, Loader2 } from 'lucide-react';
-import { HEBREW_LETTERS, randomLetter } from '../lib/gameLogic.js';
+import { useEffect, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Dices, Play, LogIn, ChevronDown, ChevronLeft, Loader2, Swords, History, Trophy, Hourglass } from 'lucide-react';
+import { HEBREW_LETTERS, randomLetter, relativeTime } from '../lib/gameLogic.js';
 import { backend } from '../lib/backend.js';
-import { getSavedName, saveName, setIdentity } from '../lib/storage.js';
+import { getSavedName, saveName, setIdentity, getIdentity, getMyRooms, addMyRoom, removeMyRoom } from '../lib/storage.js';
+import { getHistory, recordFinishedGame, historyTally } from '../lib/history.js';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -13,6 +14,47 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const [myGames, setMyGames] = useState(null); // null = still loading
+  const [history, setHistory] = useState(getHistory());
+
+  // Load my open rooms; finished ones found here (e.g. the opponent conceded
+  // while this tab was closed) get recorded to history and cleaned up.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const codes = getMyRooms();
+      const results = await Promise.all(
+        codes.map(async (c) => {
+          try {
+            return { code: c, state: await backend.getRoom(c) };
+          } catch {
+            return { code: c, state: undefined }; // network trouble — keep for next time
+          }
+        })
+      );
+      const active = [];
+      for (const { code, state } of results) {
+        if (state === undefined) continue;
+        if (state === null) {
+          removeMyRoom(code);
+          continue;
+        }
+        if (state.room.status === 'finished') {
+          const me = backend.mode === 'local' ? null : (getIdentity(code)?.player ?? null);
+          recordFinishedGame({ room: state.room, turns: state.turns, me });
+          removeMyRoom(code);
+          if (backend.mode === 'local' || me != null) backend.markResultSeen({ code, player: me });
+          continue;
+        }
+        active.push(state);
+      }
+      if (!cancelled) {
+        setMyGames(active);
+        setHistory(getHistory());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function createGame() {
     const playerName = name.trim() || 'שחקן 1';
@@ -22,6 +64,7 @@ export default function Home() {
       saveName(playerName);
       const room = await backend.createRoom({ letter, playerName });
       setIdentity(room.code, { player: 1, name: playerName });
+      addMyRoom(room.code);
       navigate(`/room/${room.code}`);
     } catch (e) {
       setError(e.message || 'משהו השתבש, נסו שוב');
@@ -45,6 +88,55 @@ export default function Home() {
           מי שנתקע בלי מילים... מפסיד! 🎉
         </p>
       </section>
+
+      {myGames?.length > 0 && (
+        <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
+            <Swords size={18} className="text-mint-400" />
+            המשחקים שלי
+          </h2>
+          <div className="space-y-2">
+            {myGames.map(({ room }) => {
+              const me = backend.mode === 'local' ? null : (getIdentity(room.code)?.player ?? null);
+              const myTurn = room.status === 'playing' && me != null && room.current_turn === me;
+              const waiting = room.status === 'waiting';
+              const turnName = room.current_turn === 1 ? room.player1_name : room.player2_name;
+              return (
+                <Link
+                  key={room.code}
+                  to={`/room/${room.code}`}
+                  className="flex items-center gap-3 rounded-2xl bg-night-950/60 p-3 ring-1 ring-white/10 transition hover:bg-white/5 active:scale-[0.98]"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-mint-400 to-emerald-600 text-2xl font-black text-night-950">
+                    {room.letter}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-white">
+                      {room.player1_name}{room.player2_name ? ` נגד ${room.player2_name}` : ''}
+                    </div>
+                    <div className="text-xs text-slate-400">{relativeTime(room.updated_at)}</div>
+                  </div>
+                  {waiting ? (
+                    <span className="flex items-center gap-1 rounded-full bg-sun-400/15 px-2.5 py-1 text-xs font-medium text-sun-400">
+                      <Hourglass size={11} />
+                      ממתין
+                    </span>
+                  ) : myTurn ? (
+                    <span className="animate-pulse-ring rounded-full bg-mint-400 px-2.5 py-1 text-xs font-bold text-night-950">
+                      תורך!
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">
+                      תור של {turnName}
+                    </span>
+                  )}
+                  <ChevronLeft size={16} className="shrink-0 text-slate-500" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-3xl bg-night-800/70 p-6 shadow-xl ring-1 ring-white/10">
         <h2 className="mb-4 text-lg font-bold text-white">משחק חדש</h2>
@@ -139,6 +231,52 @@ export default function Home() {
           </button>
         </form>
       </section>
+
+      {history.length > 0 && (
+        <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+              <History size={18} className="text-sky-300" />
+              היסטוריה
+            </h2>
+            {(() => {
+              const { wins, losses } = historyTally();
+              return (wins + losses > 0) && (
+                <span className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300 ring-1 ring-white/10">
+                  <Trophy size={12} className="text-sun-400" />
+                  {wins} נצחונות · {losses} הפסדים
+                </span>
+              );
+            })()}
+          </div>
+          <div className="space-y-1.5">
+            {history.slice(0, 10).map((e) => {
+              const iWon = e.me != null && e.winner === e.me;
+              const iLost = e.me != null && e.winner != null && e.winner !== e.me;
+              return (
+                <div
+                  key={e.code}
+                  className="flex items-center gap-3 rounded-2xl bg-night-950/50 px-3 py-2.5 ring-1 ring-white/5"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5 text-lg font-black text-slate-300 ring-1 ring-white/10">
+                    {e.letter}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-white">
+                      <span className={e.winner === 1 ? 'font-bold text-mint-400' : ''}>{e.p1}</span>
+                      <span className="mx-1.5 font-mono text-slate-400">{e.s1}:{e.s2}</span>
+                      <span className={e.winner === 2 ? 'font-bold text-mint-400' : ''}>{e.p2}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">{relativeTime(e.at)}</div>
+                  </div>
+                  {iWon && <span className="rounded-full bg-mint-400/15 px-2.5 py-0.5 text-xs font-bold text-mint-400">ניצחון 🏆</span>}
+                  {iLost && <span className="rounded-full bg-rose-400/10 px-2.5 py-0.5 text-xs text-rose-300">הפסד</span>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -115,6 +115,28 @@ function createSupabaseBackend() {
       if (error) throw error;
     },
 
+    // Marks that this player saw the final result; deletes the room (and its
+    // turns, via cascade) once both players have seen it. Failures are
+    // swallowed — worst case the room simply stays in the database.
+    async markResultSeen({ code, player }) {
+      try {
+        const col = player === 1 ? 'p1_seen_result' : 'p2_seen_result';
+        const { data, error } = await supabase
+          .from('rooms')
+          .update({ [col]: true })
+          .eq('code', code)
+          .eq('status', 'finished')
+          .select('p1_seen_result, p2_seen_result')
+          .maybeSingle();
+        if (error || !data) return;
+        if (data.p1_seen_result && data.p2_seen_result) {
+          await supabase.from('rooms').delete().eq('code', code);
+        }
+      } catch {
+        /* room cleanup is best-effort */
+      }
+    },
+
     // Realtime changes push a refetch; a slow poll covers missed events.
     subscribe(code, onChange) {
       const refetch = async () => {
@@ -215,6 +237,15 @@ function createLocalBackend() {
       state.room.win_reason = action;
       state.room.updated_at = now;
       writeLocal(code, state);
+    },
+
+    // Local pass-and-play: one shared device, so delete as soon as it's seen.
+    async markResultSeen({ code }) {
+      try {
+        localStorage.removeItem(LOCAL_PREFIX + code);
+      } catch {
+        /* ignore */
+      }
     },
 
     subscribe(code, onChange) {
