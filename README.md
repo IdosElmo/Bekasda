@@ -27,9 +27,10 @@ turn-based multiplayer. Fully RTL, mobile-first, deployable to GitHub Pages.
   blocked once; submitting again sends it anyway (dictionaries miss slang and
   some inflections). Network failures fail open so offline play never gets stuck.
 - **Active games & history**: the home page lists your open rooms with a
-  "תורך!" badge, and finished games move into a local history section with a
-  win/loss tally. Finished rooms are deleted from Supabase once both players
-  have seen the result.
+  "תורך!" badge, and finished games appear in a scrollable history section with
+  a win/loss tally. In online mode both lists come from the database, keyed by
+  an anonymous per-browser player id — finished rooms are kept in Supabase as
+  the history record (local pass-and-play mode keeps history in localStorage).
 
 ### No backend? Local mode
 
@@ -53,8 +54,9 @@ npm run dev
    (creates `rooms` + `turns`, permissive RLS policies for anonymous play, and
    enables Realtime on both tables).
    - Already ran an older schema.sql? Run
-     [`supabase/upgrade-active-games.sql`](supabase/upgrade-active-games.sql)
-     once instead — it adds the seen-result columns and the delete policy.
+     [`supabase/upgrade-db-history.sql`](supabase/upgrade-db-history.sql)
+     once instead — it adds the player-id and score columns used by the
+     "my games" / history lists.
 3. Copy **Project Settings → API → Project URL** and the **anon public key** into:
    - Local dev: `.env` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
    - GitHub deploy: repository **Settings → Secrets and variables → Actions →

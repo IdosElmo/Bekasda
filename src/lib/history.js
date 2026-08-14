@@ -39,10 +39,10 @@ export function recordFinishedGame({ room, turns, me }) {
   return entry;
 }
 
-export function historyTally() {
+export function historyTally(entries) {
   let wins = 0;
   let losses = 0;
-  for (const e of getHistory()) {
+  for (const e of entries) {
     if (e.me == null || !e.winner) continue;
     if (e.winner === e.me) wins += 1;
     else losses += 1;

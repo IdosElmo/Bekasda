@@ -3,8 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Dices, Play, LogIn, ChevronDown, ChevronLeft, Loader2, Swords, History, Trophy, Hourglass } from 'lucide-react';
 import { HEBREW_LETTERS, randomLetter, relativeTime } from '../lib/gameLogic.js';
 import { backend } from '../lib/backend.js';
-import { getSavedName, saveName, setIdentity, getIdentity, getMyRooms, addMyRoom, removeMyRoom } from '../lib/storage.js';
-import { getHistory, recordFinishedGame, historyTally } from '../lib/history.js';
+import { getSavedName, saveName, setIdentity, getIdentity, getPlayerId, addMyRoom } from '../lib/storage.js';
+import { historyTally } from '../lib/history.js';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -15,42 +15,21 @@ export default function Home() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [myGames, setMyGames] = useState(null); // null = still loading
-  const [history, setHistory] = useState(getHistory());
+  const [history, setHistory] = useState([]);
 
-  // Load my open rooms; finished ones found here (e.g. the opponent conceded
-  // while this tab was closed) get recorded to history and cleaned up.
+  // Active games and history come from the backend (Supabase in online mode,
+  // localStorage in local mode), keyed by this browser's anonymous player id.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const codes = getMyRooms();
-      const results = await Promise.all(
-        codes.map(async (c) => {
-          try {
-            return { code: c, state: await backend.getRoom(c) };
-          } catch {
-            return { code: c, state: undefined }; // network trouble — keep for next time
-          }
-        })
-      );
-      const active = [];
-      for (const { code, state } of results) {
-        if (state === undefined) continue;
-        if (state === null) {
-          removeMyRoom(code);
-          continue;
+      try {
+        const { active, finished } = await backend.listMyGames({ playerId: getPlayerId() });
+        if (!cancelled) {
+          setMyGames(active);
+          setHistory(finished);
         }
-        if (state.room.status === 'finished') {
-          const me = backend.mode === 'local' ? null : (getIdentity(code)?.player ?? null);
-          recordFinishedGame({ room: state.room, turns: state.turns, me });
-          removeMyRoom(code);
-          if (backend.mode === 'local' || me != null) backend.markResultSeen({ code, player: me });
-          continue;
-        }
-        active.push(state);
-      }
-      if (!cancelled) {
-        setMyGames(active);
-        setHistory(getHistory());
+      } catch {
+        if (!cancelled) setMyGames([]);
       }
     })();
     return () => { cancelled = true; };
@@ -62,7 +41,7 @@ export default function Home() {
     setError('');
     try {
       saveName(playerName);
-      const room = await backend.createRoom({ letter, playerName });
+      const room = await backend.createRoom({ letter, playerName, playerId: getPlayerId() });
       setIdentity(room.code, { player: 1, name: playerName });
       addMyRoom(room.code);
       navigate(`/room/${room.code}`);
@@ -96,8 +75,13 @@ export default function Home() {
             המשחקים שלי
           </h2>
           <div className="space-y-2">
-            {myGames.map(({ room }) => {
-              const me = backend.mode === 'local' ? null : (getIdentity(room.code)?.player ?? null);
+            {myGames.map((room) => {
+              const myId = getPlayerId();
+              const me = backend.mode === 'local'
+                ? null
+                : room.player1_id === myId ? 1
+                : room.player2_id === myId ? 2
+                : (getIdentity(room.code)?.player ?? null);
               const myTurn = room.status === 'playing' && me != null && room.current_turn === me;
               const waiting = room.status === 'waiting';
               const turnName = room.current_turn === 1 ? room.player1_name : room.player2_name;
@@ -208,30 +192,6 @@ export default function Home() {
         {error && <p className="mt-2 text-center text-sm text-rose-400">{error}</p>}
       </section>
 
-      <section className="rounded-3xl bg-night-800/70 p-6 shadow-xl ring-1 ring-white/10">
-        <h2 className="mb-1 text-lg font-bold text-white">הוזמנתם למשחק?</h2>
-        <p className="mb-3 text-xs text-slate-400">הזינו את קוד החדר שקיבלתם מחבר/ה</p>
-        <form onSubmit={joinGame} className="flex gap-2">
-          <input
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value)}
-            placeholder="K7KKV"
-            aria-label="קוד חדר"
-            maxLength={8}
-            dir="ltr"
-            className="min-w-0 flex-1 rounded-2xl bg-night-950/80 px-4 py-3 text-center font-mono text-lg tracking-widest text-white placeholder-slate-500 ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-mint-400"
-          />
-          <button
-            type="submit"
-            disabled={!joinCode.trim()}
-            className="flex items-center gap-2 rounded-2xl bg-white/10 px-5 font-bold text-white transition hover:bg-white/20 active:scale-95 disabled:opacity-40"
-          >
-            <LogIn size={18} />
-            הצטרפות
-          </button>
-        </form>
-      </section>
-
       {history.length > 0 && (
         <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
           <div className="mb-3 flex items-center justify-between">
@@ -240,7 +200,7 @@ export default function Home() {
               היסטוריה
             </h2>
             {(() => {
-              const { wins, losses } = historyTally();
+              const { wins, losses } = historyTally(history);
               return (wins + losses > 0) && (
                 <span className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300 ring-1 ring-white/10">
                   <Trophy size={12} className="text-sun-400" />
@@ -249,8 +209,8 @@ export default function Home() {
               );
             })()}
           </div>
-          <div className="space-y-1.5">
-            {history.slice(0, 10).map((e) => {
+          <div className="max-h-64 space-y-1.5 overflow-y-auto pl-1">
+            {history.map((e) => {
               const iWon = e.me != null && e.winner === e.me;
               const iLost = e.me != null && e.winner != null && e.winner !== e.me;
               return (
@@ -277,6 +237,30 @@ export default function Home() {
           </div>
         </section>
       )}
+
+      <section className="rounded-3xl bg-night-800/70 p-6 shadow-xl ring-1 ring-white/10">
+        <h2 className="mb-1 text-lg font-bold text-white">הוזמנתם למשחק?</h2>
+        <p className="mb-3 text-xs text-slate-400">הזינו את קוד החדר שקיבלתם מחבר/ה</p>
+        <form onSubmit={joinGame} className="flex gap-2">
+          <input
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+            placeholder="K7KKV"
+            aria-label="קוד חדר"
+            maxLength={8}
+            dir="ltr"
+            className="min-w-0 flex-1 rounded-2xl bg-night-950/80 px-4 py-3 text-center font-mono text-lg tracking-widest text-white placeholder-slate-500 ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-mint-400"
+          />
+          <button
+            type="submit"
+            disabled={!joinCode.trim()}
+            className="flex items-center gap-2 rounded-2xl bg-white/10 px-5 font-bold text-white transition hover:bg-white/20 active:scale-95 disabled:opacity-40"
+          >
+            <LogIn size={18} />
+            הצטרפות
+          </button>
+        </form>
+      </section>
     </div>
   );
 }
