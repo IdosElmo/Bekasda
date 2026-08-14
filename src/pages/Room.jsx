@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Loader2, Hourglass, PartyPopper, Home as HomeIcon, Eye, LogIn, HardHat, UserPlus } from 'lucide-react';
 import { backend } from '../lib/backend.js';
-import { getIdentity, setIdentity, getSavedName, saveName, getPlayerId, addMyRoom, removeMyRoom } from '../lib/storage.js';
+import { getIdentity, setIdentity, getSavedName, saveName, addMyRoom, removeMyRoom } from '../lib/storage.js';
+import { useAuth, effectivePlayerId } from '../lib/auth.js';
 import { recordFinishedGame } from '../lib/history.js';
 import { usedWordsSet, scoreFor, relativeTime } from '../lib/gameLogic.js';
 import ScoreBoard from '../components/ScoreBoard.jsx';
@@ -29,6 +30,7 @@ export default function Room() {
   const [error, setError] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const feedEndRef = useRef(null);
+  const { user } = useAuth();
 
   const refresh = useCallback((next) => setState(next), []);
 
@@ -87,7 +89,7 @@ export default function Room() {
     setError('');
     try {
       saveName(name);
-      await backend.joinRoom(code, name, getPlayerId());
+      await backend.joinRoom(code, name, effectivePlayerId(user));
       if (!isLocal) {
         const id = { player: 2, name };
         setIdentity(code, id);

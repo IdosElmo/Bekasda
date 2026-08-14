@@ -28,10 +28,13 @@ const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
 
 export const isOnlineMode = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
+// Shared client — also used by auth.js for Google sign-in. Null in local mode.
+export const supabaseClient = isOnlineMode ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
 /* ------------------------------ Supabase ------------------------------ */
 
 function createSupabaseBackend() {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabase = supabaseClient;
 
   async function getRoom(code) {
     const { data: room, error } = await supabase
@@ -128,14 +131,16 @@ function createSupabaseBackend() {
       }
     },
 
-    // Everything this browser's player is part of: open games + finished
-    // games (the finished rooms ARE the history — they are kept, not deleted).
-    async listMyGames({ playerId }) {
-      if (!playerId) return { active: [], finished: [] };
+    // Everything this player is part of: open games + finished games (the
+    // finished rooms ARE the history — they are kept, not deleted). Accepts
+    // several ids so a signed-in user still sees games played as a guest.
+    async listMyGames({ playerIds }) {
+      const ids = (playerIds ?? []).filter(Boolean);
+      if (ids.length === 0) return { active: [], finished: [] };
       const { data, error } = await supabase
         .from('rooms')
         .select('*')
-        .or(`player1_id.eq.${playerId},player2_id.eq.${playerId}`)
+        .or(ids.flatMap((id) => [`player1_id.eq.${id}`, `player2_id.eq.${id}`]).join(','))
         .order('updated_at', { ascending: false })
         .limit(60);
       if (error) throw error;
@@ -156,7 +161,7 @@ function createSupabaseBackend() {
           s1: r.score1 ?? 0,
           s2: r.score2 ?? 0,
           winner: r.winner,
-          me: r.player1_id === playerId ? 1 : 2,
+          me: ids.includes(r.player1_id) ? 1 : 2,
           at: r.updated_at,
         }));
       return { active, finished };

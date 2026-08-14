@@ -3,8 +3,9 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Dices, Play, LogIn, ChevronDown, ChevronLeft, Loader2, Swords, History, Trophy, Hourglass } from 'lucide-react';
 import { HEBREW_LETTERS, randomLetter, relativeTime } from '../lib/gameLogic.js';
 import { backend } from '../lib/backend.js';
-import { getSavedName, saveName, setIdentity, getIdentity, getPlayerId, addMyRoom } from '../lib/storage.js';
+import { getSavedName, saveName, setIdentity, getIdentity, addMyRoom } from '../lib/storage.js';
 import { historyTally } from '../lib/history.js';
+import { useAuth, effectivePlayerId, myPlayerIds, displayName } from '../lib/auth.js';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -16,14 +17,17 @@ export default function Home() {
   const [error, setError] = useState('');
   const [myGames, setMyGames] = useState(null); // null = still loading
   const [history, setHistory] = useState([]);
+  const { user, loading: authLoading } = useAuth();
 
   // Active games and history come from the backend (Supabase in online mode,
-  // localStorage in local mode), keyed by this browser's anonymous player id.
+  // localStorage in local mode), keyed by the signed-in account when there is
+  // one, plus the anonymous browser id so guest games still show.
   useEffect(() => {
+    if (authLoading) return undefined;
     let cancelled = false;
     (async () => {
       try {
-        const { active, finished } = await backend.listMyGames({ playerId: getPlayerId() });
+        const { active, finished } = await backend.listMyGames({ playerIds: myPlayerIds(user) });
         if (!cancelled) {
           setMyGames(active);
           setHistory(finished);
@@ -33,7 +37,16 @@ export default function Home() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authLoading, user?.id]);
+
+  // First sign-in on an empty name field: borrow the Google profile name.
+  useEffect(() => {
+    if (user && !name.trim()) {
+      const profileName = displayName(user);
+      if (profileName) setName(profileName.split(' ')[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   async function createGame() {
     const playerName = name.trim() || 'שחקן 1';
@@ -41,7 +54,7 @@ export default function Home() {
     setError('');
     try {
       saveName(playerName);
-      const room = await backend.createRoom({ letter, playerName, playerId: getPlayerId() });
+      const room = await backend.createRoom({ letter, playerName, playerId: effectivePlayerId(user) });
       setIdentity(room.code, { player: 1, name: playerName });
       addMyRoom(room.code);
       navigate(`/room/${room.code}`);
@@ -76,11 +89,11 @@ export default function Home() {
           </h2>
           <div className="space-y-2">
             {myGames.map((room) => {
-              const myId = getPlayerId();
+              const myIds = myPlayerIds(user);
               const me = backend.mode === 'local'
                 ? null
-                : room.player1_id === myId ? 1
-                : room.player2_id === myId ? 2
+                : myIds.includes(room.player1_id) ? 1
+                : myIds.includes(room.player2_id) ? 2
                 : (getIdentity(room.code)?.player ?? null);
               const myTurn = room.status === 'playing' && me != null && room.current_turn === me;
               const waiting = room.status === 'waiting';
