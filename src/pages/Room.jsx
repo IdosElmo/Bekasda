@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Loader2, Hourglass, PartyPopper, Home as HomeIcon, Eye, LogIn, HardHat, UserPlus } from 'lucide-react';
 import { backend } from '../lib/backend.js';
-import { getIdentity, setIdentity, getSavedName, saveName } from '../lib/storage.js';
+import { getIdentity, setIdentity, getSavedName, saveName, addMyRoom, removeMyRoom } from '../lib/storage.js';
+import { recordFinishedGame } from '../lib/history.js';
 import { usedWordsSet, scoreFor, relativeTime } from '../lib/gameLogic.js';
 import ScoreBoard from '../components/ScoreBoard.jsx';
 import HistoryFeed from '../components/HistoryFeed.jsx';
@@ -68,6 +69,19 @@ export default function Room() {
     feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [turns.length]);
 
+  // When the game ends: save it to this player's local history, drop it from
+  // the active-games list, and let the backend clean the room up (Supabase
+  // deletes it once BOTH players have seen the result; local mode right away).
+  // The finished screen stays visible because subscribe ignores missing rooms.
+  useEffect(() => {
+    if (!room || room.status !== 'finished') return;
+    if (!isLocal && myPlayer == null) return; // spectators keep nothing
+    recordFinishedGame({ room, turns, me: isLocal ? null : myPlayer });
+    removeMyRoom(code);
+    backend.markResultSeen({ code, player: myPlayer });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.status]);
+
   async function handleJoin(e) {
     e.preventDefault();
     const name = joinName.trim() || 'שחקן 2';
@@ -81,6 +95,7 @@ export default function Room() {
         setIdentity(code, id);
         setIdentityState(id);
       }
+      addMyRoom(code);
       const fresh = await backend.getRoom(code);
       if (fresh) setState(fresh);
     } catch (err) {

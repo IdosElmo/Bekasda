@@ -1,17 +1,21 @@
 import { useState } from 'react';
-import { Send, Flag, Loader2, AlertCircle } from 'lucide-react';
+import { Send, Flag, Loader2, AlertCircle, BookOpen } from 'lucide-react';
 import { MAX_WORDS_PER_TURN, validateTurn, validateWord } from '../lib/gameLogic.js';
+import { isRealWord } from '../lib/dictionary.js';
 
 export default function TurnComposer({ letter, usedWords, onSubmit, onGiveUp, activeName }) {
   const [words, setWords] = useState(['', '', '']);
   const [errors, setErrors] = useState({});
   const [general, setGeneral] = useState('');
   const [sending, setSending] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [dictArmed, setDictArmed] = useState(false);
   const [shake, setShake] = useState(false);
   const [confirmGiveUp, setConfirmGiveUp] = useState(false);
 
   function updateWord(i, value) {
     setWords((prev) => prev.map((w, j) => (j === i ? value : w)));
+    setDictArmed(false);
     if (errors[i] || general) {
       setErrors((prev) => { const next = { ...prev }; delete next[i]; return next; });
       setGeneral('');
@@ -32,12 +36,36 @@ export default function TurnComposer({ letter, usedWords, onSubmit, onGiveUp, ac
       fail(result.errors, result.general);
       return;
     }
+    // Dictionary check (he.wiktionary + he.wikipedia). Unknown-network results
+    // pass through; a word that is definitely not found blocks once, and a
+    // second submit sends it anyway (dictionaries miss slang and inflections).
+    if (!dictArmed) {
+      // result.words follows the order of the non-empty inputs.
+      const filledIdx = words
+        .map((w, i) => (w.trim() ? i : -1))
+        .filter((i) => i >= 0);
+      setChecking(true);
+      const checks = await Promise.all(result.words.map(isRealWord));
+      setChecking(false);
+      const dictErrors = {};
+      checks.forEach((found, j) => {
+        if (found === false) {
+          dictErrors[filledIdx[j]] = 'לא מצאנו את המילה במילון';
+        }
+      });
+      if (Object.keys(dictErrors).length > 0) {
+        setDictArmed(true);
+        fail(dictErrors, 'בטוחים שזו מילה אמיתית? לחיצה נוספת על "שליחה" תשלח בכל זאת');
+        return;
+      }
+    }
     setSending(true);
     try {
       await onSubmit(result.words);
       setWords(['', '', '']);
       setErrors({});
       setGeneral('');
+      setDictArmed(false);
     } catch (err) {
       fail({}, err.message || 'שליחה נכשלה, נסו שוב');
     } finally {
@@ -99,11 +127,15 @@ export default function TurnComposer({ letter, usedWords, onSubmit, onGiveUp, ac
       <div className="flex gap-2 pt-1">
         <button
           type="submit"
-          disabled={sending || filledCount === 0}
+          disabled={sending || checking || filledCount === 0}
           className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-mint-400 to-emerald-500 px-4 py-3 font-bold text-night-950 shadow-lg transition hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
         >
-          {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-          שליחה
+          {sending || checking
+            ? <Loader2 size={18} className="animate-spin" />
+            : dictArmed
+              ? <BookOpen size={18} />
+              : <Send size={18} />}
+          {checking ? 'בודקים במילון...' : dictArmed ? 'לשלוח בכל זאת' : 'שליחה'}
         </button>
         {confirmGiveUp ? (
           <button
