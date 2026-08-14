@@ -8,7 +8,9 @@
 //                 words: string[], created_at }
 
 import { createClient } from '@supabase/supabase-js';
-import { makeRoomCode } from './gameLogic.js';
+import { makeRoomCode, scoreFor } from './gameLogic.js';
+import { getMyRooms, removeMyRoom } from './storage.js';
+import { recordFinishedGame, getHistory } from './history.js';
 
 // Tolerate common paste mistakes in the project URL: trailing slashes, an API
 // path suffix like /rest/v1, or even the dashboard URL instead of the API host.
@@ -51,13 +53,13 @@ function createSupabaseBackend() {
   return {
     mode: 'supabase',
 
-    async createRoom({ letter, playerName }) {
+    async createRoom({ letter, playerName, playerId }) {
       // Retry on the (unlikely) chance of a room-code collision.
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const code = makeRoomCode();
         const { data, error } = await supabase
           .from('rooms')
-          .insert({ code, letter, player1_name: playerName, status: 'waiting', current_turn: 1 })
+          .insert({ code, letter, player1_name: playerName, player1_id: playerId, status: 'waiting', current_turn: 1 })
           .select()
           .single();
         if (!error) return data;
@@ -68,10 +70,10 @@ function createSupabaseBackend() {
 
     getRoom,
 
-    async joinRoom(code, playerName) {
+    async joinRoom(code, playerName, playerId) {
       const { data, error } = await supabase
         .from('rooms')
-        .update({ player2_name: playerName, status: 'playing', updated_at: new Date().toISOString() })
+        .update({ player2_name: playerName, player2_id: playerId, status: 'playing', updated_at: new Date().toISOString() })
         .eq('code', code)
         .is('player2_name', null)
         .select()
@@ -113,28 +115,51 @@ function createSupabaseBackend() {
         .eq('code', code)
         .eq('status', 'playing');
       if (error) throw error;
+      // Stamp final scores onto the room so history reads need no turn fetch.
+      // Best-effort: fails harmlessly if the score columns don't exist yet.
+      try {
+        const { data: turns } = await supabase.from('turns').select('player, action, words').eq('room_code', code);
+        await supabase
+          .from('rooms')
+          .update({ score1: scoreFor(turns ?? [], 1), score2: scoreFor(turns ?? [], 2) })
+          .eq('code', code);
+      } catch {
+        /* ignore */
+      }
     },
 
-    // Marks that this player saw the final result; deletes the room (and its
-    // turns, via cascade) once both players have seen it. Failures are
-    // swallowed — worst case the room simply stays in the database.
-    async markResultSeen({ code, player }) {
-      try {
-        const col = player === 1 ? 'p1_seen_result' : 'p2_seen_result';
-        const { data, error } = await supabase
-          .from('rooms')
-          .update({ [col]: true })
-          .eq('code', code)
-          .eq('status', 'finished')
-          .select('p1_seen_result, p2_seen_result')
-          .maybeSingle();
-        if (error || !data) return;
-        if (data.p1_seen_result && data.p2_seen_result) {
-          await supabase.from('rooms').delete().eq('code', code);
-        }
-      } catch {
-        /* room cleanup is best-effort */
-      }
+    // Everything this browser's player is part of: open games + finished
+    // games (the finished rooms ARE the history — they are kept, not deleted).
+    async listMyGames({ playerId }) {
+      if (!playerId) return { active: [], finished: [] };
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .or(`player1_id.eq.${playerId},player2_id.eq.${playerId}`)
+        .order('updated_at', { ascending: false })
+        .limit(60);
+      if (error) throw error;
+      const rooms = data ?? [];
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const active = rooms.filter(
+        (r) => r.status === 'playing'
+          || (r.status === 'waiting' && new Date(r.updated_at).getTime() > weekAgo)
+      );
+      const finished = rooms
+        .filter((r) => r.status === 'finished')
+        .slice(0, 50)
+        .map((r) => ({
+          code: r.code,
+          letter: r.letter,
+          p1: r.player1_name,
+          p2: r.player2_name,
+          s1: r.score1 ?? 0,
+          s2: r.score2 ?? 0,
+          winner: r.winner,
+          me: r.player1_id === playerId ? 1 : 2,
+          at: r.updated_at,
+        }));
+      return { active, finished };
     },
 
     // Realtime changes push a refetch; a slow poll covers missed events.
@@ -205,7 +230,7 @@ function createLocalBackend() {
       return readLocal(code);
     },
 
-    async joinRoom(code, playerName) {
+    async joinRoom(code, playerName, _playerId) {
       const state = readLocal(code);
       if (!state) throw new Error('החדר לא נמצא');
       if (state.room.player2_name) throw new Error('החדר כבר מלא');
@@ -239,13 +264,34 @@ function createLocalBackend() {
       writeLocal(code, state);
     },
 
-    // Local pass-and-play: one shared device, so delete as soon as it's seen.
-    async markResultSeen({ code }) {
+    // Local pass-and-play: one shared device, so delete once it's been seen.
+    async deleteRoom(code) {
       try {
         localStorage.removeItem(LOCAL_PREFIX + code);
       } catch {
         /* ignore */
       }
+    },
+
+    // Local mode keeps history in localStorage; finished rooms found here
+    // (e.g. never revisited) get recorded and cleaned up on the spot.
+    async listMyGames() {
+      const active = [];
+      for (const code of getMyRooms()) {
+        const state = readLocal(code);
+        if (!state) {
+          removeMyRoom(code);
+          continue;
+        }
+        if (state.room.status === 'finished') {
+          recordFinishedGame({ room: state.room, turns: state.turns, me: null });
+          removeMyRoom(code);
+          this.deleteRoom(code);
+          continue;
+        }
+        active.push(state.room);
+      }
+      return { active, finished: getHistory() };
     },
 
     subscribe(code, onChange) {

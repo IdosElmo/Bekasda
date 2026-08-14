@@ -6,15 +6,23 @@ create table if not exists public.rooms (
   letter text not null,
   player1_name text,
   player2_name text,
+  -- Anonymous per-browser player ids; power the "my games" / history queries.
+  player1_id text,
+  player2_id text,
   current_turn int not null default 1 check (current_turn in (1, 2)),
   status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
   winner int check (winner in (1, 2)),
   win_reason text check (win_reason in ('pass', 'concede')),
-  p1_seen_result boolean not null default false,
-  p2_seen_result boolean not null default false,
+  -- Final word counts, stamped when the game ends. Finished rooms are kept —
+  -- they are the players' game history.
+  score1 int,
+  score2 int,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists rooms_player1_id_idx on public.rooms (player1_id);
+create index if not exists rooms_player2_id_idx on public.rooms (player2_id);
 
 create table if not exists public.turns (
   id bigint generated always as identity primary key,

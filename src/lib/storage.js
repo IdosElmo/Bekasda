@@ -4,6 +4,22 @@
 const IDENTITY_PREFIX = 'bekasda:identity:';
 const NAME_KEY = 'bekasda:name';
 const MY_ROOMS_KEY = 'bekasda:my-rooms';
+const PLAYER_ID_KEY = 'bekasda:player-id';
+
+// Stable anonymous id for this browser — lets the DB answer "my games"
+// without accounts. Games are therefore keyed to the browser profile.
+export function getPlayerId() {
+  try {
+    let id = localStorage.getItem(PLAYER_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID?.() ?? `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      localStorage.setItem(PLAYER_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
 
 export function getIdentity(code) {
   try {
