@@ -10,8 +10,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { makeRoomCode } from './gameLogic.js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Tolerate common paste mistakes in the project URL: trailing slashes, an API
+// path suffix like /rest/v1, or even the dashboard URL instead of the API host.
+function normalizeSupabaseUrl(raw) {
+  let url = (raw ?? '').trim().replace(/\/+$/, '');
+  if (!url) return url;
+  const dashboard = url.match(/^https:\/\/(?:app\.|www\.)?supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+  if (dashboard) return `https://${dashboard[1]}.supabase.co`;
+  url = url.replace(/\/(?:rest|auth|realtime|storage|functions)\/v\d+$/i, '');
+  return url.replace(/\/+$/, '');
+}
+
+const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
 
 export const isOnlineMode = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
