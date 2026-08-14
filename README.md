@@ -66,6 +66,28 @@ npm run dev
 > RLS policies in the schema. This game intentionally allows anonymous
 > read/write on rooms — fine for a casual game, not for sensitive data.
 
+## Optional: Google sign-in
+
+Signing in is never required — guests play with an anonymous per-browser id.
+With Google sign-in enabled, a player's games and history follow their account
+across devices (the account id is stored in the same `player1_id`/`player2_id`
+columns, so **no extra SQL is needed**). Games played as a guest on the same
+browser remain visible after signing in.
+
+One-time dashboard setup (no code or env changes):
+
+1. **Google Cloud Console** → APIs & Services → Credentials → Create
+   Credentials → OAuth client ID (type: Web application). Add the authorized
+   redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`.
+2. **Supabase** → Authentication → Sign In / Providers → Google → enable, and
+   paste the client ID + client secret from step 1.
+3. **Supabase** → Authentication → URL Configuration → set **Site URL** to
+   `https://<user>.github.io/Bekasda/` and add the same URL to
+   **Redirect URLs** (add `http://localhost:5173/Bekasda/` too for local dev).
+
+Until this is configured, the "התחברות" button will show a provider error from
+Supabase when clicked — everything else keeps working.
+
 ## Deploying to GitHub Pages
 
 1. Push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
