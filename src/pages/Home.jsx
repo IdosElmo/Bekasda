@@ -81,60 +81,6 @@ export default function Home() {
         </p>
       </section>
 
-      {myGames?.length > 0 && (
-        <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
-            <Swords size={18} className="text-mint-400" />
-            המשחקים שלי
-          </h2>
-          <div className="space-y-2">
-            {myGames.map((room) => {
-              const myIds = myPlayerIds(user);
-              const me = backend.mode === 'local'
-                ? null
-                : myIds.includes(room.player1_id) ? 1
-                : myIds.includes(room.player2_id) ? 2
-                : (getIdentity(room.code)?.player ?? null);
-              const myTurn = room.status === 'playing' && me != null && room.current_turn === me;
-              const waiting = room.status === 'waiting';
-              const turnName = room.current_turn === 1 ? room.player1_name : room.player2_name;
-              return (
-                <Link
-                  key={room.code}
-                  to={`/room/${room.code}`}
-                  className="flex items-center gap-3 rounded-2xl bg-night-950/60 p-3 ring-1 ring-white/10 transition hover:bg-white/5 active:scale-[0.98]"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-mint-400 to-emerald-600 text-2xl font-black text-night-950">
-                    {room.letter}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-white">
-                      {room.player1_name}{room.player2_name ? ` נגד ${room.player2_name}` : ''}
-                    </div>
-                    <div className="text-xs text-slate-400">{relativeTime(room.updated_at)}</div>
-                  </div>
-                  {waiting ? (
-                    <span className="flex items-center gap-1 rounded-full bg-sun-400/15 px-2.5 py-1 text-xs font-medium text-sun-400">
-                      <Hourglass size={11} />
-                      ממתין
-                    </span>
-                  ) : myTurn ? (
-                    <span className="animate-pulse-ring rounded-full bg-mint-400 px-2.5 py-1 text-xs font-bold text-night-950">
-                      תורך!
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">
-                      תור של {turnName}
-                    </span>
-                  )}
-                  <ChevronLeft size={16} className="shrink-0 text-slate-500" />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
       <section className="rounded-3xl bg-night-800/70 p-6 shadow-xl ring-1 ring-white/10">
         <h2 className="mb-4 text-lg font-bold text-white">משחק חדש</h2>
 
@@ -204,6 +150,60 @@ export default function Home() {
         </button>
         {error && <p className="mt-2 text-center text-sm text-rose-400">{error}</p>}
       </section>
+
+      {myGames?.length > 0 && (
+        <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
+            <Swords size={18} className="text-mint-400" />
+            המשחקים שלי
+          </h2>
+          <div className="space-y-2">
+            {myGames.map((room) => {
+              const myIds = myPlayerIds(user);
+              const me = backend.mode === 'local'
+                ? null
+                : myIds.includes(room.player1_id) ? 1
+                : myIds.includes(room.player2_id) ? 2
+                : (getIdentity(room.code)?.player ?? null);
+              const myTurn = room.status === 'playing' && me != null && room.current_turn === me;
+              const waiting = room.status === 'waiting';
+              const turnName = room.current_turn === 1 ? room.player1_name : room.player2_name;
+              return (
+                <Link
+                  key={room.code}
+                  to={`/room/${room.code}`}
+                  className="flex items-center gap-3 rounded-2xl bg-night-950/60 p-3 ring-1 ring-white/10 transition hover:bg-white/5 active:scale-[0.98]"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-mint-400 to-emerald-600 text-2xl font-black text-night-950">
+                    {room.letter}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-white">
+                      {room.player1_name}{room.player2_name ? ` נגד ${room.player2_name}` : ''}
+                    </div>
+                    <div className="text-xs text-slate-400">{relativeTime(room.updated_at)}</div>
+                  </div>
+                  {waiting ? (
+                    <span className="flex items-center gap-1 rounded-full bg-sun-400/15 px-2.5 py-1 text-xs font-medium text-sun-400">
+                      <Hourglass size={11} />
+                      ממתין
+                    </span>
+                  ) : myTurn ? (
+                    <span className="animate-pulse-ring rounded-full bg-mint-400 px-2.5 py-1 text-xs font-bold text-night-950">
+                      תורך!
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">
+                      תור של {turnName}
+                    </span>
+                  )}
+                  <ChevronLeft size={16} className="shrink-0 text-slate-500" />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {history.length > 0 && (
         <section className="rounded-3xl bg-night-800/70 p-5 shadow-xl ring-1 ring-white/10">
