@@ -3,6 +3,7 @@ import { HardHat, WifiOff, Loader2 } from 'lucide-react';
 import Home from './pages/Home.jsx';
 import Room from './pages/Room.jsx';
 import AuthButton from './components/AuthButton.jsx';
+import NotificationsBell from './components/NotificationsBell.jsx';
 import { isOnlineMode } from './lib/backend.js';
 
 export default function App() {
@@ -23,7 +24,10 @@ export default function App() {
           בקסדה
         </Link>
         {isOnlineMode ? (
-          <AuthButton />
+          <div className="flex items-center gap-2">
+            <NotificationsBell />
+            <AuthButton />
+          </div>
         ) : (
           <span
             className="flex items-center gap-1 rounded-full bg-sun-400/15 px-3 py-1 text-xs font-medium text-sun-400"
