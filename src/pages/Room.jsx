@@ -4,6 +4,7 @@ import { Loader2, Hourglass, PartyPopper, Home as HomeIcon, Eye, LogIn, HardHat,
 import { backend } from '../lib/backend.js';
 import { getIdentity, setIdentity, getSavedName, saveName, addMyRoom, removeMyRoom } from '../lib/storage.js';
 import { useAuth, effectivePlayerId } from '../lib/auth.js';
+import { notifyLocal } from '../lib/notifications.js';
 import { recordFinishedGame } from '../lib/history.js';
 import { usedWordsSet, scoreFor, relativeTime } from '../lib/gameLogic.js';
 import ScoreBoard from '../components/ScoreBoard.jsx';
@@ -65,6 +66,23 @@ export default function Room() {
   useEffect(() => {
     document.title = myTurn ? '🔔 תורך! — בקסדה' : 'בקסדה 🪖';
     return () => { document.title = 'בקסדה 🪖'; };
+  }, [myTurn]);
+
+  // Tier-1 notification when the turn becomes ours while the tab is hidden.
+  // Same tag as the service-worker push so the two collapse into one.
+  const wasMyTurnRef = useRef(myTurn);
+  useEffect(() => {
+    if (myTurn && !wasMyTurnRef.current && !isLocal) {
+      const opponent = myPlayer === 1 ? room?.player2_name : room?.player1_name;
+      notifyLocal({
+        title: 'תורך! 🪖',
+        body: opponent ? `${opponent} שיחק/ה — עכשיו תורך` : 'עכשיו תורך',
+        tag: `bekasda-${code}`,
+        url: `#/room/${code}`,
+      });
+    }
+    wasMyTurnRef.current = myTurn;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTurn]);
 
   useEffect(() => {

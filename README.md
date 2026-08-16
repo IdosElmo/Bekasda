@@ -88,6 +88,38 @@ One-time dashboard setup (no code or env changes):
 Until this is configured, the "התחברות" button will show a provider error from
 Supabase when clicked — everything else keeps working.
 
+## Optional: turn notifications (Web Push)
+
+Two tiers, both behind the 🔔 button in the header:
+
+- **Tier 1 (no setup):** while a game tab is open somewhere, the app fires a
+  browser notification when it becomes your turn. Works immediately once the
+  player grants permission.
+- **Tier 2 (setup below):** real push through a service worker — arrives even
+  with the site closed. Android/desktop work from the browser; iPhone requires
+  adding the app to the home screen (iOS 16.4+) first.
+
+One-time setup for Tier 2:
+
+1. Generate a VAPID keypair: `npx web-push generate-vapid-keys`.
+2. GitHub → repo **Settings → Secrets → Actions** → add `VITE_VAPID_PUBLIC_KEY`
+   with the **public** key (then redeploy).
+3. Run [`supabase/upgrade-push.sql`](supabase/upgrade-push.sql) in the SQL
+   Editor (creates the `push_subscriptions` table).
+4. Create the Edge Function: Supabase → **Edge Functions → Deploy a new
+   function** → name it `notify-turn`, paste
+   [`supabase/functions/notify-turn/index.ts`](supabase/functions/notify-turn/index.ts)
+   (or `supabase functions deploy notify-turn` with the CLI). In the function's
+   settings, **disable "Enforce JWT verification"** so the webhook can call it.
+5. Set the function's secrets (Edge Functions → Secrets): `VAPID_PUBLIC_KEY`,
+   `VAPID_PRIVATE_KEY` (the private key lives **only** here), and
+   `VAPID_SUBJECT` (e.g. `mailto:you@example.com`).
+6. Create the webhook: Supabase → **Database → Webhooks → Create** → table
+   `rooms`, event **Update**, type **Supabase Edge Function** → `notify-turn`.
+
+Players are notified when the opponent joins, when it becomes their turn, and
+when they win. Dead subscriptions are pruned automatically.
+
 ## Deploying to GitHub Pages
 
 1. Push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)

@@ -47,6 +47,23 @@ create policy "rooms anon delete" on public.rooms for delete using (true);
 create policy "turns anon select" on public.turns for select using (true);
 create policy "turns anon insert" on public.turns for insert with check (true);
 
+-- Web Push subscriptions, one row per device, keyed by player id.
+create table if not exists public.push_subscriptions (
+  endpoint text primary key,
+  player_id text not null,
+  subscription jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_player_idx on public.push_subscriptions (player_id);
+
+alter table public.push_subscriptions enable row level security;
+
+create policy "push anon select" on public.push_subscriptions for select using (true);
+create policy "push anon insert" on public.push_subscriptions for insert with check (true);
+create policy "push anon update" on public.push_subscriptions for update using (true) with check (true);
+create policy "push anon delete" on public.push_subscriptions for delete using (true);
+
 -- Realtime: push room/turn changes to connected clients.
 alter publication supabase_realtime add table public.rooms;
 alter publication supabase_realtime add table public.turns;
