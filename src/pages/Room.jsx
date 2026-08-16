@@ -62,6 +62,14 @@ export default function Room() {
   const myPlayer = isLocal ? (room?.current_turn ?? null) : (identity?.player ?? null);
   const myTurn = room?.status === 'playing' && myPlayer != null && room.current_turn === myPlayer;
 
+  // A 'pass' turn while the room is still playing = the passer led on points
+  // and the opponent is now chasing: they keep taking turns until they exceed
+  // the passer's score (win) or give up (lose). The pass may be followed by
+  // several chase turns, so look for the most recent pass, not just the last.
+  const lastPass = [...turns].reverse().find((t) => t.action === 'pass');
+  const lastChance = room?.status === 'playing' && Boolean(lastPass);
+  const passerPlayer = lastChance ? lastPass.player : null;
+
   // Tab title nudges the player when it's their move.
   useEffect(() => {
     document.title = myTurn ? '🔔 תורך! — בקסדה' : 'בקסדה 🪖';
@@ -124,7 +132,11 @@ export default function Room() {
   }
 
   async function handleSubmitWords(words) {
-    await backend.submitTurn({ code, player: myPlayer, words });
+    if (lastChance) {
+      await backend.submitLastChance({ code, player: myPlayer, words });
+    } else {
+      await backend.submitTurn({ code, player: myPlayer, words });
+    }
     const fresh = await backend.getRoom(code);
     if (fresh) setState(fresh);
     setCelebrate(true);
@@ -133,7 +145,11 @@ export default function Room() {
 
   async function handleGiveUp() {
     try {
-      await backend.endGame({ code, player: myPlayer, action: 'pass' });
+      if (lastChance) {
+        await backend.submitLastChance({ code, player: myPlayer, words: [] });
+      } else {
+        await backend.passTurn({ code, player: myPlayer });
+      }
       const fresh = await backend.getRoom(code);
       if (fresh) setState(fresh);
     } catch (err) {
@@ -312,6 +328,17 @@ export default function Room() {
       {room.status === 'playing' && (
         myTurn ? (
           <Card>
+            {lastChance && (
+              <div className="animate-pop-in mb-3 rounded-2xl bg-sun-400/10 p-3 text-center ring-1 ring-sun-400/30">
+                <p className="text-sm font-bold text-sun-400">🔥 המרדף פתוח!</p>
+                <p className="mt-0.5 text-xs text-slate-300">
+                  ל{passerPlayer === 1 ? room.player1_name : room.player2_name} נגמרו
+                  המילים עם {scores[passerPlayer]} נקודות — מגיעים
+                  ל‑{scores[passerPlayer] + 1} ומנצחים! חסרות לך עוד{' '}
+                  {scores[passerPlayer] + 1 - scores[myPlayer]} מילים
+                </p>
+              </div>
+            )}
             <TurnComposer
               letter={room.letter}
               usedWords={usedWordsSet(turns)}
@@ -322,11 +349,24 @@ export default function Room() {
           </Card>
         ) : (
           <Card className="text-center">
-            <Hourglass size={22} className="mx-auto mb-1.5 animate-float text-sun-400" />
-            <p className="font-bold text-white">עכשיו תור של {opponentName}</p>
-            <p className="mt-1 text-xs text-slate-400">
-              פעילות אחרונה: {relativeTime(lastActivity)} · אפשר לסגור ולחזור מאוחר יותר, הכל נשמר
-            </p>
+            {lastChance ? (
+              <>
+                <p className="text-2xl" aria-hidden>😬</p>
+                <p className="mt-1 font-bold text-white">נגמרו לך המילים — אבל יש לך יתרון!</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  {opponentName} במרדף: {scores[room.current_turn]} מתוך{' '}
+                  {scores[myPlayer] + 1} שצריך כדי לעקוף אותך
+                </p>
+              </>
+            ) : (
+              <>
+                <Hourglass size={22} className="mx-auto mb-1.5 animate-float text-sun-400" />
+                <p className="font-bold text-white">עכשיו תור של {opponentName}</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  פעילות אחרונה: {relativeTime(lastActivity)} · אפשר לסגור ולחזור מאוחר יותר, הכל נשמר
+                </p>
+              </>
+            )}
           </Card>
         )
       )}

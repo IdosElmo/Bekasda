@@ -17,8 +17,12 @@ turn-based multiplayer. Fully RTL, mobile-first, deployable to GitHub Pages.
   Supabase and updates in realtime (with a polling fallback). Your player
   identity per room is kept in `localStorage`, so refreshing is seamless.
 - The activity feed shows every turn ("דנה שלחה: בננה, בטריה, במבה").
-- A player with no words left taps **"אין לי מילים"** (with confirmation) and
-  the opponent wins. Scores count total valid words per player.
+- A player with no words left taps **"אין לי מילים"** (with confirmation).
+  With fewer or equal points than the opponent — they lose immediately. While
+  **leading on points**, the game instead becomes a **chase**: the opponent
+  keeps taking turns (up to 3 words each) and wins the moment they EXCEED the
+  passer's score (target = passer's score + 1); giving up during the chase
+  loses. Scores count total valid words per player.
 - Client-side validation enforces: Hebrew only, must start with the room's
   letter, max 3 words per turn, and no repeats across the whole game
   (final letters ך/ם/ן/ף/ץ are normalized so "אבנים"/"אבנימ" style dupes are caught).
