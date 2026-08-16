@@ -36,6 +36,28 @@ export const supabaseClient = isOnlineMode ? createClient(SUPABASE_URL, SUPABASE
 function createSupabaseBackend() {
   const supabase = supabaseClient;
 
+  // Marks the room finished. The essential update goes first; score stamping
+  // is best-effort so a missing migration can't block the game from ending.
+  async function finishRoom(code, winner, scores = null) {
+    const { error } = await supabase
+      .from('rooms')
+      .update({ status: 'finished', winner, win_reason: 'pass', updated_at: new Date().toISOString() })
+      .eq('code', code)
+      .eq('status', 'playing');
+    if (error) throw error;
+    try {
+      let { score1, score2 } = scores ?? {};
+      if (score1 == null) {
+        const { data: turns } = await supabase.from('turns').select('player, action, words').eq('room_code', code);
+        score1 = scoreFor(turns ?? [], 1);
+        score2 = scoreFor(turns ?? [], 2);
+      }
+      await supabase.from('rooms').update({ score1, score2 }).eq('code', code);
+    } catch {
+      /* score columns are best-effort */
+    }
+  }
+
   async function getRoom(code) {
     const { data: room, error } = await supabase
       .from('rooms')
@@ -102,33 +124,63 @@ function createSupabaseBackend() {
       return data;
     },
 
-    async endGame({ code, player, action }) {
-      const { error: turnError } = await supabase
+    // "No more words". With fewer/equal points the passer loses immediately;
+    // with a lead, the turn flips and the opponent gets ONE last-chance turn
+    // (a 'pass' turn while the room is still 'playing' encodes that state).
+    async passTurn({ code, player }) {
+      const { data: turns, error: turnsError } = await supabase
+        .from('turns').select('player, action, words').eq('room_code', code);
+      if (turnsError) throw turnsError;
+      const myScore = scoreFor(turns ?? [], player);
+      const oppScore = scoreFor(turns ?? [], player === 1 ? 2 : 1);
+      const { error: insertError } = await supabase
         .from('turns')
-        .insert({ room_code: code, player, action, words: [] });
-      if (turnError) throw turnError;
-      const { error } = await supabase
-        .from('rooms')
-        .update({
-          status: 'finished',
-          winner: player === 1 ? 2 : 1,
-          win_reason: action,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('code', code)
-        .eq('status', 'playing');
-      if (error) throw error;
-      // Stamp final scores onto the room so history reads need no turn fetch.
-      // Best-effort: fails harmlessly if the score columns don't exist yet.
-      try {
-        const { data: turns } = await supabase.from('turns').select('player, action, words').eq('room_code', code);
-        await supabase
+        .insert({ room_code: code, player, action: 'pass', words: [] });
+      if (insertError) throw insertError;
+
+      if (myScore > oppScore) {
+        const { error } = await supabase
           .from('rooms')
-          .update({ score1: scoreFor(turns ?? [], 1), score2: scoreFor(turns ?? [], 2) })
-          .eq('code', code);
-      } catch {
-        /* ignore */
+          .update({ current_turn: player === 1 ? 2 : 1, updated_at: new Date().toISOString() })
+          .eq('code', code)
+          .eq('current_turn', player);
+        if (error) throw error;
+        return { lastChance: true };
       }
+      await finishRoom(code, player === 1 ? 2 : 1);
+      return { lastChance: false };
+    },
+
+    // A chase turn: the trailing player keeps submitting (up to 3 words per
+    // turn) until they EXCEED the passer's score — win the moment they do —
+    // or give up with words=[] and lose. The turn never flips back.
+    async submitLastChance({ code, player, words }) {
+      const { error: insertError } = await supabase
+        .from('turns')
+        .insert({ room_code: code, player, action: words.length ? 'words' : 'pass', words });
+      if (insertError) throw insertError;
+      const { data: turns, error: turnsError } = await supabase
+        .from('turns').select('player, action, words').eq('room_code', code);
+      if (turnsError) throw turnsError;
+      const s1 = scoreFor(turns ?? [], 1);
+      const s2 = scoreFor(turns ?? [], 2);
+      const passer = player === 1 ? 2 : 1;
+      const myScore = player === 1 ? s1 : s2;
+      const passerScore = passer === 1 ? s1 : s2;
+      if (words.length === 0) {
+        await finishRoom(code, passer, { score1: s1, score2: s2 });
+        return { finished: true };
+      }
+      if (myScore > passerScore) {
+        await finishRoom(code, player, { score1: s1, score2: s2 });
+        return { finished: true };
+      }
+      // Not there yet — keep the chase going (touch the room for freshness).
+      await supabase
+        .from('rooms')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('code', code);
+      return { finished: false };
     },
 
     // Everything this player is part of: open games + finished games (the
@@ -257,16 +309,44 @@ function createLocalBackend() {
       return state.room;
     },
 
-    async endGame({ code, player, action }) {
+    async passTurn({ code, player }) {
       const state = readLocal(code);
       if (!state) throw new Error('החדר לא נמצא');
       const now = new Date().toISOString();
-      state.turns.push({ player, action, words: [], created_at: now });
+      const myScore = scoreFor(state.turns, player);
+      const oppScore = scoreFor(state.turns, player === 1 ? 2 : 1);
+      state.turns.push({ player, action: 'pass', words: [], created_at: now });
+      state.room.updated_at = now;
+      if (myScore > oppScore) {
+        state.room.current_turn = player === 1 ? 2 : 1;
+        writeLocal(code, state);
+        return { lastChance: true };
+      }
       state.room.status = 'finished';
       state.room.winner = player === 1 ? 2 : 1;
-      state.room.win_reason = action;
-      state.room.updated_at = now;
+      state.room.win_reason = 'pass';
       writeLocal(code, state);
+      return { lastChance: false };
+    },
+
+    async submitLastChance({ code, player, words }) {
+      const state = readLocal(code);
+      if (!state) throw new Error('החדר לא נמצא');
+      const now = new Date().toISOString();
+      state.turns.push({ player, action: words.length ? 'words' : 'pass', words, created_at: now });
+      state.room.updated_at = now;
+      const passer = player === 1 ? 2 : 1;
+      const myScore = scoreFor(state.turns, player);
+      const passerScore = scoreFor(state.turns, passer);
+      if (words.length === 0 || myScore > passerScore) {
+        state.room.status = 'finished';
+        state.room.winner = words.length === 0 ? passer : player;
+        state.room.win_reason = 'pass';
+        writeLocal(code, state);
+        return { finished: true };
+      }
+      writeLocal(code, state);
+      return { finished: false };
     },
 
     // Local pass-and-play: one shared device, so delete once it's been seen.
